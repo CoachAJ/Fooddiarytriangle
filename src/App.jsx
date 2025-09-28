@@ -7,6 +7,9 @@ import { Textarea } from '@/components/ui/textarea.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx'
 import { Progress } from '@/components/ui/progress.jsx'
+import {
+  LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip as ReTooltip, ResponsiveContainer, BarChart, Bar
+} from 'recharts'
 import { 
   Activity, 
   Apple, 
@@ -21,7 +24,7 @@ import {
   Bell
 } from 'lucide-react'
 import './App.css'
-import { listFoods, addFoodApi, listSymptoms, addSymptomApi, getInsights } from '@/lib/api.js'
+import { listFoods, addFoodApi, listSymptoms, addSymptomApi, getInsights, seedDemo, exportCSV } from '@/lib/api.js'
 
 function App() {
   const [currentTab, setCurrentTab] = useState('dashboard')
@@ -47,6 +50,8 @@ function App() {
   ])
 
   const [insights, setInsights] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const addFood = async () => {
     if (!foodEntry.trim()) return
@@ -61,6 +66,7 @@ function App() {
       setFoodEntry('')
     } catch (err) {
       console.error('Failed to add food', err)
+      setError('Failed to add food')
     }
   }
 
@@ -77,6 +83,51 @@ function App() {
       setSymptomEntry('')
     } catch (err) {
       console.error('Failed to add symptom', err)
+      setError('Failed to add symptom')
+    }
+  }
+
+  const refreshAll = async () => {
+    const [f, s, inz] = await Promise.all([
+      listFoods(),
+      listSymptoms(),
+      getInsights(),
+    ])
+    setFoods(f)
+    setSymptoms(s)
+    setInsights(inz)
+  }
+
+  const onSeedDemo = async () => {
+    setLoading(true); setError('')
+    try {
+      await seedDemo()
+      await refreshAll()
+    } catch (e) {
+      console.error(e)
+      setError('Failed to seed demo data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const onExportCSV = async () => {
+    setLoading(true); setError('')
+    try {
+      const blob = await exportCSV()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'triangle-health-export.csv'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error(e)
+      setError('Failed to export CSV')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -85,14 +136,7 @@ function App() {
     // Initial data load from APIs
     (async () => {
       try {
-        const [f, s, inz] = await Promise.all([
-          listFoods(),
-          listSymptoms(),
-          getInsights(),
-        ])
-        setFoods(f)
-        setSymptoms(s)
-        setInsights(inz)
+        await refreshAll()
       } catch (e) {
         console.warn('Initial data load failed', e)
       }
@@ -114,6 +158,27 @@ function App() {
           <h1 className="text-4xl font-bold text-gray-800 mb-2">Triangle of Health</h1>
           <p className="text-gray-600">Track your food, symptoms, and discover the connections</p>
         </div>
+
+        {/* Actions toolbar */}
+        <div className="flex flex-wrap items-center gap-3 mb-6 justify-between">
+          <div className="flex gap-2">
+            <Button onClick={onSeedDemo} disabled={loading} className="bg-blue-600 hover:bg-blue-700">
+              Seed Demo Data
+            </Button>
+            <Button onClick={onExportCSV} disabled={loading} variant="outline">
+              Export CSV
+            </Button>
+          </div>
+          {loading && (
+            <span className="text-sm text-gray-600">Working...</span>
+          )}
+        </div>
+
+        {error && (
+          <div className="mb-6 p-3 rounded border border-red-300 bg-red-50 text-red-700 text-sm">
+            {error}
+          </div>
+        )}
 
         {/* Navigation Tabs */}
         <Tabs value={currentTab} onValueChange={setCurrentTab} className="w-full">
@@ -161,6 +226,85 @@ function App() {
                   <div className="text-2xl font-bold text-purple-700">{triangleScores.adrenal}%</div>
                   <Progress value={triangleScores.adrenal} className="mt-2" />
                   <p className="text-xs text-purple-600 mt-2">Excellent balance</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Food Entries (Last 7 Days)</CardTitle>
+                  <CardDescription>Track how consistently you log your meals</CardDescription>
+                </CardHeader>
+                <CardContent style={{ width: '100%', height: 260 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={(() => {
+                      const map = new Map()
+                      const now = new Date()
+                      for (let i = 6; i >= 0; i--) {
+                        const d = new Date(now)
+                        d.setDate(now.getDate() - i)
+                        const key = `${d.getMonth()+1}/${d.getDate()}`
+                        map.set(key, 0)
+                      }
+                      for (const f of foods) {
+                        const d = new Date(f.time)
+                        if (isNaN(d)) continue
+                        const key = `${d.getMonth()+1}/${d.getDate()}`
+                        if (map.has(key)) map.set(key, (map.get(key) || 0) + 1)
+                      }
+                      return Array.from(map, ([day, count]) => ({ day, count }))
+                    })()}>
+                      <CartesianGrid stroke="#eee" strokeDasharray="5 5" />
+                      <XAxis dataKey="day" />
+                      <YAxis allowDecimals={false} />
+                      <ReTooltip />
+                      <Bar dataKey="count" fill="#3CAADF" radius={[4,4,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Avg Symptom Severity (Last 7 Days)</CardTitle>
+                  <CardDescription>Higher bars indicate tougher days</CardDescription>
+                </CardHeader>
+                <CardContent style={{ width: '100%', height: 260 }}>
+                  <ResponsiveContainer>
+                    <LineChart data={(
+                      () => {
+                        const map = new Map()
+                        const cnt = new Map()
+                        const now = new Date()
+                        for (let i = 6; i >= 0; i--) {
+                          const d = new Date(now)
+                          d.setDate(now.getDate() - i)
+                          const key = `${d.getMonth()+1}/${d.getDate()}`
+                          map.set(key, 0); cnt.set(key, 0)
+                        }
+                        for (const s of symptoms) {
+                          const d = new Date(s.time)
+                          if (isNaN(d)) continue
+                          const key = `${d.getMonth()+1}/${d.getDate()}`
+                          if (map.has(key)) {
+                            map.set(key, (map.get(key) || 0) + (Number(s.severity)||0))
+                            cnt.set(key, (cnt.get(key) || 0) + 1)
+                          }
+                        }
+                        return Array.from(map, ([day, sum]) => {
+                          const c = cnt.get(day) || 0
+                          return { day, avg: c ? Number((sum/c).toFixed(2)) : 0 }
+                        })
+                      }
+                    )()}>
+                      <CartesianGrid stroke="#eee" strokeDasharray="5 5" />
+                      <XAxis dataKey="day" />
+                      <YAxis domain={[0,5]} allowDecimals />
+                      <ReTooltip />
+                      <Line type="monotone" dataKey="avg" stroke="#F58A34" strokeWidth={3} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
                 </CardContent>
               </Card>
             </div>

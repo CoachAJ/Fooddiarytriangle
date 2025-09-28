@@ -43,3 +43,18 @@ export async function getInsights() {
   const data = await res.json()
   return data.insights || []
 }
+
+// Seed demo data for WOW experience
+export async function seedDemo() {
+  const res = await fetch(`${BASE}/seed_demo`)
+  if (!res.ok) throw new Error('Failed to seed demo data')
+  return res.json()
+}
+
+// Export CSV of foods and symptoms
+export async function exportCSV() {
+  const res = await fetch(`${BASE}/export_csv`)
+  if (!res.ok) throw new Error('Failed to export CSV')
+  const blob = await res.blob()
+  return blob
+}
