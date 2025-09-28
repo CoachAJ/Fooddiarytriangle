@@ -3,8 +3,8 @@
 import { getStore } from '@netlify/blobs'
 
 const STORE_NAME = 'triangle-health-store'
-const FOODS_KEY = 'foods.json'
-const SYMPTOMS_KEY = 'symptoms.json'
+const FOODS_PREFIX = 'foods_'
+const SYMPTOMS_PREFIX = 'symptoms_'
 
 function toCSV(rows){
   return rows.map(r => r.map(v => {
@@ -15,12 +15,23 @@ function toCSV(rows){
   }).join(',')).join('\n')
 }
 
-export async function handler(){
+function getUserId(event){
+  try{
+    const ctx = event.clientContext || {}
+    const user = (ctx.user || ctx.identity || {}).sub || (ctx.user && ctx.user.sub)
+    return user || 'public'
+  }catch{
+    return 'public'
+  }
+}
+
+export async function handler(event){
   try {
+    const userId = getUserId(event)
     const store = getStore({ name: STORE_NAME })
     const [foods, symptoms] = await Promise.all([
-      store.get(FOODS_KEY, { type: 'json' }).then(v => Array.isArray(v)?v:[]).catch(()=>[]),
-      store.get(SYMPTOMS_KEY, { type: 'json' }).then(v => Array.isArray(v)?v:[]).catch(()=>[]),
+      store.get(`${FOODS_PREFIX}${userId}.json`, { type: 'json' }).then(v => Array.isArray(v)?v:[]).catch(()=>[]),
+      store.get(`${SYMPTOMS_PREFIX}${userId}.json`, { type: 'json' }).then(v => Array.isArray(v)?v:[]).catch(()=>[]),
     ])
 
     const rows = []

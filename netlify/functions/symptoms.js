@@ -4,26 +4,40 @@
 import { getStore } from '@netlify/blobs'
 
 const STORE_NAME = 'triangle-health-store'
-const SYMPTOMS_KEY = 'symptoms.json'
+const SYMPTOMS_PREFIX = 'symptoms_'
 
-let memorySymptoms = []
+const memorySymptoms = new Map() // userId -> list
 
-async function readSymptoms() {
+function getUserId(event) {
   try {
-    const store = getStore({ name: STORE_NAME })
-    const contents = await store.get(SYMPTOMS_KEY, { type: 'json' })
-    return Array.isArray(contents) ? contents : []
+    const ctx = event.clientContext || {}
+    const user = (ctx.user || ctx.identity || {}).sub || (ctx.user && ctx.user.sub)
+    return user || 'public'
   } catch {
-    return memorySymptoms
+    return 'public'
   }
 }
 
-async function writeSymptoms(list) {
+function keyFor(userId){
+  return `${SYMPTOMS_PREFIX}${userId}.json`
+}
+
+async function readSymptoms(userId) {
   try {
     const store = getStore({ name: STORE_NAME })
-    await store.set(SYMPTOMS_KEY, JSON.stringify(list), { metadata: { updatedAt: new Date().toISOString() } })
+    const contents = await store.get(keyFor(userId), { type: 'json' })
+    return Array.isArray(contents) ? contents : []
   } catch {
-    memorySymptoms = list
+    return memorySymptoms.get(userId) || []
+  }
+}
+
+async function writeSymptoms(userId, list) {
+  try {
+    const store = getStore({ name: STORE_NAME })
+    await store.set(keyFor(userId), JSON.stringify(list), { metadata: { updatedAt: new Date().toISOString(), userId } })
+  } catch {
+    memorySymptoms.set(userId, list)
   }
 }
 
@@ -40,12 +54,14 @@ export async function handler(event) {
   }
 
   if (event.httpMethod === 'GET') {
-    const list = await readSymptoms()
+    const userId = getUserId(event)
+    const list = await readSymptoms(userId)
     return { statusCode: 200, headers, body: JSON.stringify({ items: list }) }
   }
 
   if (event.httpMethod === 'POST') {
     try {
+      const userId = getUserId(event)
       const payload = JSON.parse(event.body || '{}')
       const { name, severity, time } = payload
       if (!name) {
@@ -58,9 +74,9 @@ export async function handler(event) {
         time: time || new Date().toISOString(),
         created_at: new Date().toISOString()
       }
-      const list = await readSymptoms()
+      const list = await readSymptoms(userId)
       const updated = [item, ...list]
-      await writeSymptoms(updated)
+      await writeSymptoms(userId, updated)
       return { statusCode: 201, headers, body: JSON.stringify({ item }) }
     } catch (e) {
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to add symptom', details: String(e) }) }

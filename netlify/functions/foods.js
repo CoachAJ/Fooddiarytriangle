@@ -5,29 +5,43 @@
 import { getStore } from '@netlify/blobs'
 
 const STORE_NAME = 'triangle-health-store'
-const FOODS_KEY = 'foods.json'
+const FOODS_PREFIX = 'foods_'
 
 // In-memory fallback for local dev without Blobs
-let memoryFoods = []
+const memoryFoods = new Map() // key: userId -> list
 
-async function readFoods() {
+function getUserId(event) {
   try {
-    const store = getStore({ name: STORE_NAME })
-    const contents = await store.get(FOODS_KEY, { type: 'json' })
-    return Array.isArray(contents) ? contents : []
-  } catch (e) {
-    // Fallback
-    return memoryFoods
+    const ctx = event.clientContext || {}
+    const user = (ctx.user || ctx.identity || {}).sub || (ctx.user && ctx.user.sub)
+    return user || 'public'
+  } catch {
+    return 'public'
   }
 }
 
-async function writeFoods(list) {
+function keyFor(userId){
+  return `${FOODS_PREFIX}${userId}.json`
+}
+
+async function readFoods(userId) {
   try {
     const store = getStore({ name: STORE_NAME })
-    await store.set(FOODS_KEY, JSON.stringify(list), { metadata: { updatedAt: new Date().toISOString() } })
-  } catch (e) {
+    const contents = await store.get(keyFor(userId), { type: 'json' })
+    return Array.isArray(contents) ? contents : []
+  } catch {
     // Fallback
-    memoryFoods = list
+    return memoryFoods.get(userId) || []
+  }
+}
+
+async function writeFoods(userId, list) {
+  try {
+    const store = getStore({ name: STORE_NAME })
+    await store.set(keyFor(userId), JSON.stringify(list), { metadata: { updatedAt: new Date().toISOString(), userId } })
+  } catch {
+    // Fallback
+    memoryFoods.set(userId, list)
   }
 }
 
@@ -44,12 +58,14 @@ export async function handler(event) {
   }
 
   if (event.httpMethod === 'GET') {
-    const list = await readFoods()
+    const userId = getUserId(event)
+    const list = await readFoods(userId)
     return { statusCode: 200, headers, body: JSON.stringify({ items: list }) }
   }
 
   if (event.httpMethod === 'POST') {
     try {
+      const userId = getUserId(event)
       const payload = JSON.parse(event.body || '{}')
       const { name, time, feeling, tags } = payload
       if (!name) {
@@ -63,9 +79,9 @@ export async function handler(event) {
         tags: Array.isArray(tags) ? tags : [],
         created_at: new Date().toISOString()
       }
-      const list = await readFoods()
+      const list = await readFoods(userId)
       const updated = [item, ...list]
-      await writeFoods(updated)
+      await writeFoods(userId, updated)
       return { statusCode: 201, headers, body: JSON.stringify({ item }) }
     } catch (e) {
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to add food', details: String(e) }) }

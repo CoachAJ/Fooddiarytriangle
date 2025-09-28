@@ -3,16 +3,27 @@
 import { getStore } from '@netlify/blobs'
 
 const STORE_NAME = 'triangle-health-store'
-const FOODS_KEY = 'foods.json'
-const SYMPTOMS_KEY = 'symptoms.json'
+const FOODS_PREFIX = 'foods_'
+const SYMPTOMS_PREFIX = 'symptoms_'
 
 function daysAgo(n){
   const d = new Date(); d.setDate(d.getDate()-n); return d
 }
 
-export async function handler(){
+function getUserId(event){
+  try{
+    const ctx = event.clientContext || {}
+    const user = (ctx.user || ctx.identity || {}).sub || (ctx.user && ctx.user.sub)
+    return user || 'public'
+  }catch{
+    return 'public'
+  }
+}
+
+export async function handler(event){
   const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   try {
+    const userId = getUserId(event)
     const store = getStore({ name: STORE_NAME })
 
     const foods = [
@@ -30,8 +41,8 @@ export async function handler(){
       { id: crypto.randomUUID(), name: 'Headache', severity: 2, time: daysAgo(0).toISOString(), created_at: new Date().toISOString() }
     ]
 
-    await store.set(FOODS_KEY, JSON.stringify(foods), { metadata: { seededAt: new Date().toISOString() } })
-    await store.set(SYMPTOMS_KEY, JSON.stringify(symptoms), { metadata: { seededAt: new Date().toISOString() } })
+    await store.set(`${FOODS_PREFIX}${userId}.json`, JSON.stringify(foods), { metadata: { seededAt: new Date().toISOString(), userId } })
+    await store.set(`${SYMPTOMS_PREFIX}${userId}.json`, JSON.stringify(symptoms), { metadata: { seededAt: new Date().toISOString(), userId } })
 
     return { statusCode: 200, headers, body: JSON.stringify({ ok: true, foods: foods.length, symptoms: symptoms.length }) }
   } catch (e) {

@@ -10,6 +10,8 @@ import { Progress } from '@/components/ui/progress.jsx'
 import {
   LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip as ReTooltip, ResponsiveContainer, BarChart, Bar
 } from 'recharts'
+import ReactCalendar from 'react-calendar'
+import 'react-calendar/dist/Calendar.css'
 import { 
   Activity, 
   Apple, 
@@ -24,7 +26,7 @@ import {
   Bell
 } from 'lucide-react'
 import './App.css'
-import { listFoods, addFoodApi, listSymptoms, addSymptomApi, getInsights, seedDemo, exportCSV } from '@/lib/api.js'
+import { listFoods, addFoodApi, listSymptoms, addSymptomApi, getInsights, seedDemo, exportCSV, subscribeReminders } from '@/lib/api.js'
 
 function App() {
   const [currentTab, setCurrentTab] = useState('dashboard')
@@ -52,6 +54,8 @@ function App() {
   const [insights, setInsights] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [subscriberEmail, setSubscriberEmail] = useState('')
 
   const addFood = async () => {
     if (!foodEntry.trim()) return
@@ -106,6 +110,20 @@ function App() {
     } catch (e) {
       console.error(e)
       setError('Failed to seed demo data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const onSubscribe = async () => {
+    if (!subscriberEmail) return
+    setLoading(true); setError('')
+    try {
+      await subscribeReminders(subscriberEmail)
+      setSubscriberEmail('')
+    } catch (e) {
+      console.error(e)
+      setError('Failed to subscribe to reminders')
     } finally {
       setLoading(false)
     }
@@ -169,6 +187,30 @@ function App() {
               Export CSV
             </Button>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="Email for reminders"
+              value={subscriberEmail}
+              onChange={(e) => setSubscriberEmail(e.target.value)}
+              className="w-56"
+            />
+            <Button onClick={onSubscribe} disabled={loading || !subscriberEmail}>Subscribe</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const id = window.netlifyIdentity
+                if (!id) return
+                const user = id.currentUser()
+                if (user) id.logout(); else id.open('login')
+              }}
+            >
+              {(() => {
+                const id = typeof window !== 'undefined' && window.netlifyIdentity
+                const user = id && id.currentUser && id.currentUser()
+                return user ? 'Logout' : 'Login'
+              })()}
+            </Button>
+          </div>
           {loading && (
             <span className="text-sm text-gray-600">Working...</span>
           )}
@@ -182,11 +224,12 @@ function App() {
 
         {/* Navigation Tabs */}
         <Tabs value={currentTab} onValueChange={setCurrentTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="log">Log Food</TabsTrigger>
             <TabsTrigger value="symptoms">Symptoms</TabsTrigger>
             <TabsTrigger value="insights">Insights</TabsTrigger>
+            <TabsTrigger value="calendar">Calendar</TabsTrigger>
           </TabsList>
 
           {/* Dashboard Tab */}
@@ -392,6 +435,57 @@ function App() {
                 >
                   Log Current Symptoms
                 </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Calendar Tab */}
+          <TabsContent value="calendar" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Calendar View</CardTitle>
+                <CardDescription>Select a date to see entries</CardDescription>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white rounded p-3">
+                  <ReactCalendar value={selectedDate} onChange={setSelectedDate} />
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-semibold mb-2">Foods</h3>
+                    <div className="space-y-2">
+                      {foods.filter(f => {
+                        const d = new Date(f.time); const s = new Date(selectedDate);
+                        return d.getFullYear()===s.getFullYear() && d.getMonth()===s.getMonth() && d.getDate()===s.getDate()
+                      }).map((food, idx) => (
+                        <div key={food.id || idx} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                          <div>
+                            <p className="font-medium">{food.name}</p>
+                            <p className="text-sm text-gray-500">{(() => { try { return new Date(food.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } catch { return String(food.time || '') } })()}</p>
+                          </div>
+                          <Badge variant="outline">{food.feeling}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold mb-2">Symptoms</h3>
+                    <div className="space-y-2">
+                      {symptoms.filter(sy => {
+                        const d = new Date(sy.time); const s = new Date(selectedDate);
+                        return d.getFullYear()===s.getFullYear() && d.getMonth()===s.getMonth() && d.getDate()===s.getDate()
+                      }).map((symptom, idx) => (
+                        <div key={symptom.id || idx} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                          <div>
+                            <p className="font-medium">{symptom.name}</p>
+                            <p className="text-sm text-gray-500">{(() => { try { return new Date(symptom.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } catch { return String(symptom.time || '') } })()}</p>
+                          </div>
+                          <Badge variant={symptom.severity > 3 ? "destructive" : "secondary"}>Level {symptom.severity}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
